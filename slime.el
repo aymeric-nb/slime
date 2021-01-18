@@ -1127,8 +1127,9 @@ DIRECTORY change to this directory before starting the process.
 ;;;   1. Emacs starts an inferior Lisp process.
 ;;;   2. Emacs tells Lisp (via stdio) to load and start Swank.
 ;;;   3. Lisp recompiles the Swank if needed.
-;;;   4. Lisp starts the Swank server and writes its TCP port to a temp file.
-;;;   5. Emacs reads the temp file to get the port and then connects.
+;;;   4. Lisp starts the Swank server and writes its IP address and TCP port
+;;;      to a temp file.
+;;;   5. Emacs reads the temp file to get this information and then connects.
 ;;;   6. Emacs prints a message of warm encouragement for the hacking ahead.
 ;;;
 ;;; Between steps 2-5 Emacs polls for the creation of the temp file so
@@ -1257,7 +1258,7 @@ See `slime-start'."
                         ,(slime-to-lisp-filename port-filename))))))
 
 (defun slime-swank-port-file ()
-  "Filename where the SWANK server writes its TCP port number."
+  "Filename where the SWANK server writes its IP address and TCP port number."
   (expand-file-name (format "slime.%S" (emacs-pid)) (slime-temp-directory)))
 
 (defun slime-temp-directory ()
@@ -1288,10 +1289,11 @@ See `slime-start'."
                file attempt))
     (cond ((and (file-exists-p file)
                 (> (nth 7 (file-attributes file)) 0)) ; file size
-           (let ((port (slime-read-swank-port))
+           (let ((address-and-port (slime-read-swank-address-and-port))
                  (args (slime-inferior-lisp-args process)))
              (slime-delete-swank-port-file 'message)
-             (let ((c (slime-connect slime-lisp-host port
+             (let ((c (slime-connect (car address-and-port)
+                                     (cadr address-and-port)
                                      (plist-get args :coding-system))))
                (slime-set-inferior-process c process))))
           ((and retries (zerop retries))
@@ -1327,15 +1329,18 @@ The default condition handler for timer functions (see
     (cancel-timer slime-connect-retry-timer)
     (setq slime-connect-retry-timer nil)))
 
-(defun slime-read-swank-port ()
-  "Read the Swank server port number from the `slime-swank-port-file'."
+(defun slime-read-swank-address-and-port ()
+  "Read the Swank server address and port from the `slime-swank-port-file'."
   (save-excursion
     (with-temp-buffer
       (insert-file-contents (slime-swank-port-file))
       (goto-char (point-min))
-      (let ((port (read (current-buffer))))
-        (cl-assert (integerp port))
-        port))))
+      (let ((words (split-string (buffer-string))))
+        (cl-assert (= (length words) 2))
+        (let ((address (car words))
+              (port (string-to-number (cadr words))))
+          (cl-assert (not (zerop port)))
+          (list address port))))))
 
 (defun slime-toggle-debug-on-swank-error ()
   (interactive)
